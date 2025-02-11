@@ -1,0 +1,47 @@
+---
+# tasks file for roles/deploy-app
+- name: Start Docker service
+  service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Pull the web app image from Docker Hub
+  community.docker.docker_image:
+    name: shehabfahmy/weather-app
+    source: pull
+
+- name: Check if the container exists
+  community.docker.docker_container_info:
+    name: weather_app_container
+  register: container_info
+
+- name: Remove the container if it exists
+  community.docker.docker_container:
+    name: weather_app_container
+    state: absent
+  when: container_info.exists
+
+- name: Run a new container
+  community.docker.docker_container:
+    name: weather_app_container
+    image: shehabfahmy/weather-app
+    state: started
+    restart_policy: always
+    ports:
+      - "80:5000"
+
+- name: Load API Key
+  ansible.builtin.include_vars:
+    file: ../Secrets/ansible_secrets.yaml
+
+- name: Replace API Key inside the running container
+  ansible.builtin.command: >
+    docker exec weather_app_container sed -i 's/your_openweathermap_api_key/{{ API_KEY }}/g' /app/app.py
+
+- name: Restart the container to apply changes
+  community.docker.docker_container:
+    name: weather_app_container
+    image: shehabfahmy/weather-app
+    state: started
+    restart: true

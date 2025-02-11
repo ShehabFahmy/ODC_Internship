@@ -1,0 +1,9 @@
+---
+- name: Deploy the web application on the Vagrant machines
+  user: ansibleadmin
+  become: yes
+  hosts: all
+  gather_facts: yes
+  roles:
+    - install-docker
+    - deploy-app

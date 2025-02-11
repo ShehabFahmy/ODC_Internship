@@ -1,0 +1,117 @@
+pipeline {
+    agent any
+    
+    environment {
+        PROJECT_DIR = '/var/jenkins_home/workspace/ODC_Project_Web_App_Deployment'
+        DOCKER_IMAGE_NAME = 'weather-app:latest'
+        EMAIL_RECIPIENT = 'recipient@gmail.com'
+        GITHUB_TOKEN_CREDENTIALS = 'odc-project-github-token'
+        API_KEY_CREDENTIALS = 'odc-project-weather-app-api-key'
+        DOCKER_HUB_CREDENTIALS = 'my-dockerhub-cred'
+        ANSIBLE_SSH_KEY_PRV = 'odc-project-ansible-key-prv'  // The private key used for configuring Vagrant VMs as Ansible agents
+        ANSIBLE_SSH_KEY_PUB = 'odc-project-ansible-key-pub'  // The public key used for configuring Vagrant VMs as Ansible agents
+        ANSIBLE_VAULT_PASSWORD_CREDENTIALS = 'odc-project-ansible-vault-password'
+    }
+
+    stages {
+        stage('Cloning Project Repository'){
+            steps{
+                dir("${PROJECT_DIR}") {
+                    deleteDir() // Removes the directory contents
+                    sh """
+                        git clone https://github.com/ShehabFahmy/ODC_Internship.git
+                        mv ODC*/* .
+                    """
+                    // Remove everything except the project
+                    sh 'find . -mindepth 1 -maxdepth 1 ! -name "Project*" -exec rm -rf {} +'
+                    // Keep only the project's content
+                    sh """
+                        mv Project*/* .
+                        rm -r Project*
+                    """
+                }
+            }
+        }
+        stage('Cloning Weather_App Repository') {
+            steps {
+                dir("${PROJECT_DIR}/Weather_App") {
+                    deleteDir() // Removes the directory contents
+                    git(credentialsId: "${GITHUB_TOKEN_CREDENTIALS}", url: 'https://github.com/ShehabFahmy/Weather_App.git', branch: 'main')
+                }
+            }
+        }
+        stage('Building Docker Image') {
+            steps {
+                dir("${PROJECT_DIR}/Weather_App") {
+                    sh """
+                        docker build -t ${DOCKER_IMAGE_NAME} .
+                    """
+                }
+            }
+        }
+        stage('Pushing to Docker Hub') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: "${DOCKER_HUB_CREDENTIALS}", usernameVariable: 'myusername', passwordVariable: 'mypassword')]){
+                    sh """
+                        docker login -u $myusername -p $mypassword
+                        docker tag ${DOCKER_IMAGE_NAME} $myusername/${DOCKER_IMAGE_NAME}
+                        docker push $myusername/${DOCKER_IMAGE_NAME}
+                        docker logout
+                        docker rmi ${DOCKER_IMAGE_NAME} $myusername/${DOCKER_IMAGE_NAME}
+                    """
+                }
+            }
+        }
+        stage('Deploying App using Ansible') {
+            steps {
+                dir("${PROJECT_DIR}/Secrets") {
+                    // Add the keypair, for SSH connection, to the Secrets directory
+                    withCredentials([sshUserPrivateKey(credentialsId: "${ANSIBLE_SSH_KEY_PRV}", keyFileVariable: 'PRV_SSH_KEY_PATH', usernameVariable: 'SSH_USER')]) {
+                        sh """
+                            cat "${PRV_SSH_KEY_PATH}" > \$(pwd)/ansible_ssh_key
+                            chmod 600 \$(pwd)/ansible_ssh_key
+                        """
+                    }
+                    withCredentials([sshUserPrivateKey(credentialsId: "${ANSIBLE_SSH_KEY_PUB}", keyFileVariable: 'PUB_SSH_KEY_PATH', usernameVariable: 'SSH_USER')]) {
+                        sh """
+                            cat "${PUB_SSH_KEY_PATH}" > \$(pwd)/ansible_ssh_key.pub
+                            chmod 600 \$(pwd)/ansible_ssh_key.pub
+                        """
+                    }
+                }
+                dir("${PROJECT_DIR}") {
+                    withCredentials([
+                        string(credentialsId: "$ANSIBLE_VAULT_PASSWORD_CREDENTIALS", variable: 'ANSIBLE_VAULT_PASSWORD'),
+                        string(credentialsId: "$API_KEY_CREDENTIALS", variable: 'API_KEY')]) {
+                        // Add the Ansible Vault secrets file to the container, run playbook, and remove the container after exiting
+                        sh """
+                        docker run --name ansible-container-for-deployment \
+                        -w /ansible \
+                        -v "/\$(pwd)/Ansible:/ansible" \
+                        -v "/\$(pwd)/Secrets:/Secrets" \
+                        alpine/ansible:latest \
+                        sh -c 'echo "API_KEY: ${API_KEY}" > /Secrets/ansible_secrets.yaml && \
+                        echo "$ANSIBLE_VAULT_PASSWORD" | ansible-vault encrypt /Secrets/ansible_secrets.yaml --vault-password-file /dev/stdin && \
+                        echo "$ANSIBLE_VAULT_PASSWORD" | ansible-playbook /ansible/playbook.yaml --vault-password-file /dev/stdin'
+                        docker rm ansible-container-for-deployment
+                    """
+                    }
+                }
+            }
+        }
+    }
+    post {
+        success {
+            // Use the Mailer plugin to send email on success
+            mail to: "${EMAIL_RECIPIENT}",
+                 subject: "Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' - Success",
+                 body: "The job succeeded. Check details: ${env.BUILD_URL}"
+        }
+        failure {
+            // Use the Mailer plugin to send email on failure
+            mail to: "${EMAIL_RECIPIENT}",
+                 subject: "Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' - Failed",
+                 body: "The job failed. Check details: ${env.BUILD_URL}"
+        }
+    }
+}
