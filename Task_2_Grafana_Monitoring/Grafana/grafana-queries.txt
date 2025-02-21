@@ -1,0 +1,59 @@
+SELECT
+  timestamp AS "time",
+  ram_usage,
+  container_name
+FROM
+  metrics
+WHERE
+  container_name = 'app01'
+  AND $__timeFilter(timestamp);
+  
+SELECT
+  timestamp AS "time",
+  ram_usage,
+  container_name
+FROM
+  metrics
+WHERE
+  container_name = 'app02'
+  AND $__timeFilter(timestamp);
+
+SELECT
+  timestamp AS "time",
+  cpu_usage,
+  container_name
+FROM
+  metrics
+WHERE
+  container_name = 'app01'
+  AND $__timeFilter(timestamp);
+  
+SELECT
+  timestamp AS "time",
+  cpu_usage,
+  container_name
+FROM
+  metrics
+WHERE
+  container_name = 'app02'
+  AND $__timeFilter(timestamp);
+  
+SELECT
+  timestamp AS "time",
+  disk_usage,
+  container_name
+FROM
+  metrics
+WHERE
+  container_name = 'app01'
+  AND $__timeFilter(timestamp);
+
+SELECT
+  timestamp AS "time",
+  disk_usage,
+  container_name
+FROM
+  metrics
+WHERE
+  container_name = 'app02'
+  AND $__timeFilter(timestamp);

@@ -1,0 +1,82 @@
+services:
+  app01:
+    image: polinux/stress
+    container_name: app01
+    command: ["stress", "--cpu", "1", "--io", "1", "--vm", "1", "--vm-bytes", "64M", "--timeout", "3600s"]  # Stresses 1 CPU core, 1 I/O process, and memory allocation of 64MB for 2 Minutes.
+    networks:
+      - monitoring_task
+      
+  app02:
+    image: alpine
+    container_name: app02
+    command: ["sleep", "3600s"]
+    networks:
+      - monitoring_task
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    container_name: cadvisor
+    ports:
+      - "8080:8080"
+    volumes:
+      - "/:/rootfs:ro"
+      - "/var/run:/var/run:ro"
+      - "/sys:/sys:ro"
+      - "/var/lib/docker/:/var/lib/docker:ro"
+      - "/dev/disk/:/dev/disk:ro"
+    networks:
+      - monitoring_task
+
+  db:
+    image: postgres:latest
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+      POSTGRES_DB: metrics_db
+    volumes:
+      - "./Postgres_Data:/var/lib/postgresql/data"
+    ports:
+      - "5432:5432"
+    networks:
+      - monitoring_task
+
+  metrics-collector:
+    build: ./Metrics_Collector
+    container_name: metrics-collector
+    depends_on:
+      - db
+      - cadvisor
+    restart: always
+    networks:
+      - monitoring_task
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    user: root
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_SIGNOUT_MENU: "true"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    depends_on:
+      - db
+    volumes:
+      - "Grafana_Home:/var/lib/grafana"
+      - "./Grafana/data-source.yaml:/etc/grafana/provisioning/datasources/datasource.yaml"
+    networks:
+      - monitoring_task
+
+volumes:
+  Grafana_Home:
+    driver: local
+
+networks:
+  monitoring_task:
+    driver: bridge
+
